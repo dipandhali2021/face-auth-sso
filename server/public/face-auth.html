@@ -144,6 +144,20 @@
         color: #666;
         margin-top: 5px;
       }
+      
+      .admin-link {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        font-size: 12px;
+        color: #999;
+        text-decoration: none;
+      }
+      
+      .admin-link:hover {
+        text-decoration: underline;
+        color: #666;
+      }
     </style>
   </head>
   <body>
@@ -167,6 +181,9 @@
         <input type="hidden" name="faceImage" id="face-image">
         <input type="hidden" name="action" id="action-type">
       </form>
+      
+      <!-- Admin page link -->
+      <a href="/admin.html" class="admin-link">Admin Panel</a>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>

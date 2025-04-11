@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Auth SSO - Admin Panel</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f7f9fc;
+    }
+    .container {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      padding: 25px;
+      margin-top: 30px;
+    }
+    h1 {
+      color: #2d3748;
+      margin-bottom: 24px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .warning {
+      background-color: #fff5f5;
+      color: #c53030;
+      padding: 15px;
+      border-radius: 5px;
+      border-left: 4px solid #e53e3e;
+      margin-bottom: 20px;
+    }
+    button {
+      background-color: #e53e3e;
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+      margin-top: 10px;
+      display: block;
+      width: 100%;
+    }
+    button:hover {
+      background-color: #c53030;
+    }
+    button.auth-btn {
+      background-color: #4299e1;
+    }
+    button.auth-btn:hover {
+      background-color: #3182ce;
+    }
+    .actions {
+      margin-top: 20px;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #ebf8ff;
+      border-radius: 5px;
+      border-left: 4px solid #4299e1;
+    }
+    .error {
+      background-color: #fff5f5;
+      border-left: 4px solid #e53e3e;
+    }
+    .success {
+      background-color: #f0fff4;
+      border-left: 4px solid #38a169;
+    }
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(0, 0, 0, 0.1);
+      border-radius: 50%;
+      border-top-color: #3182ce;
+      animation: spin 1s ease-in-out infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .stat-box {
+      background-color: #f7fafc;
+      padding: 15px;
+      border-radius: 5px;
+      text-align: center;
+      border: 1px solid #e2e8f0;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #2d3748;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: #718096;
+      margin-top: 5px;
+    }
+    .hidden {
+      display: none;
+    }
+    .auth-section {
+      background-color: #f8fafc;
+      padding: 20px;
+      border-radius: 5px;
+      border: 1px solid #e2e8f0;
+      margin-bottom: 20px;
+    }
+    input[type="password"] {
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #cbd5e0;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+    
+    /* Enhanced mobile responsiveness */
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+      .container {
+        padding: 15px;
+        margin-top: 10px;
+        border-radius: 5px;
+      }
+      h1 {
+        font-size: 20px;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+      }
+      h2 {
+        font-size: 18px;
+      }
+      .warning {
+        padding: 10px;
+        font-size: 14px;
+      }
+      button {
+        padding: 14px 20px;
+        font-size: 16px;
+      }
+      .auth-section {
+        padding: 15px;
+      }
+      .stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .stat-box {
+        padding: 10px;
+      }
+      .stat-value {
+        font-size: 20px;
+      }
+      .stat-label {
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Face Auth SSO - Admin Panel</h1>
+
+    <div class="warning">
+      <strong>⚠️ Warning:</strong> This admin panel provides access to dangerous operations that can permanently delete data. 
+      <br>
+      This operation will delete all users, face profiles, and images from both MongoDB and Cloudinary.
+    </div>
+
+    <!-- New Authentication Section -->
+    <div id="authSection" class="auth-section">
+      <h2>Administrator Authentication</h2>
+      <p>Please enter the admin token to access admin controls:</p>
+      <input type="password" id="adminTokenInput" placeholder="Enter admin token">
+      <button id="authenticateBtn" class="auth-btn">Authenticate</button>
+      <div id="authErrorMessage" class="error hidden"></div>
+    </div>
+
+    <div id="adminControls" class="hidden">
+      <div class="actions">
+        <h2>System Reset</h2>
+        <p>Click the button below to delete ALL data in the system:</p>
+        <button id="deleteAllBtn">DELETE ALL SYSTEM DATA</button>
+      </div>
+
+      <div id="resultContainer" class="result hidden"></div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Elements
+      const adminTokenInput = document.getElementById('adminTokenInput');
+      const authenticateBtn = document.getElementById('authenticateBtn');
+      const authSection = document.getElementById('authSection');
+      const adminControls = document.getElementById('adminControls');
+      const deleteAllBtn = document.getElementById('deleteAllBtn');
+      const resultContainer = document.getElementById('resultContainer');
+      const authErrorMessage = document.getElementById('authErrorMessage');
+
+      // Stored token from previous session if available
+      const savedToken = localStorage.getItem('faceAuthAdminToken');
+      if (savedToken) {
+        adminTokenInput.value = savedToken;
+      }
+
+      // Authentication handler
+      authenticateBtn.addEventListener('click', () => {
+        const enteredToken = adminTokenInput.value.trim();
+        // Fixed: Removed process.env reference which doesn't exist in browser
+        const expectedToken = 'your-admin-token-here'; // Replace with your actual token
+        
+        if (!enteredToken) {
+          showAuthError('Please enter an admin token');
+          return;
+        }
+        
+        // Store token in local storage for convenience
+        localStorage.setItem('faceAuthAdminToken', enteredToken);
+        
+        // Show admin controls
+        authSection.style.display = 'none';
+        adminControls.classList.remove('hidden');
+      });
+
+      // Delete all data handler - works directly without confirmation
+      deleteAllBtn.addEventListener('click', async () => {
+        // Show loading state
+        deleteAllBtn.disabled = true;
+        deleteAllBtn.innerHTML = 'DELETING DATA... <span class="loading"></span>';
+        
+        try {
+          const response = await fetch('/api/admin/delete-all-data', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-admin-token': adminTokenInput.value.trim()
+            }
+          });
+          
+          const data = await response.json();
+          
+          if (response.ok) {
+            showResult(`
+              <h3>✅ All data deleted successfully!</h3>
+              <div class="stats">
+                <div class="stat-box">
+                  <div class="stat-value">${data.details.usersDeleted}</div>
+                  <div class="stat-label">Users Deleted</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">${data.details.faceProfilesDeleted}</div>
+                  <div class="stat-label">Face Profiles</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">${data.details.tokensDeleted}</div>
+                  <div class="stat-label">Tokens</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">${data.details.authCodesDeleted}</div>
+                  <div class="stat-label">Auth Codes</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-value">${data.details.cloudinaryImagesDeleted}</div>
+                  <div class="stat-label">Images Deleted</div>
+                </div>
+              </div>
+            `, false, true);
+          } else {
+            showResult(`Error: ${data.message || 'Unknown error'}`, true);
+          }
+        } catch (error) {
+          showResult(`Error: ${error.message}`, true);
+        } finally {
+          deleteAllBtn.disabled = false;
+          deleteAllBtn.textContent = 'DELETE ALL SYSTEM DATA';
+        }
+      });
+
+      function showResult(message, isError = false, isSuccess = false) {
+        resultContainer.innerHTML = message;
+        resultContainer.classList.remove('hidden', 'error', 'success');
+        
+        if (isError) {
+          resultContainer.classList.add('error');
+        } else if (isSuccess) {
+          resultContainer.classList.add('success');
+        }
+      }
+
+      function showAuthError(message) {
+        authErrorMessage.textContent = message;
+        authErrorMessage.classList.remove('hidden');
+        setTimeout(() => {
+          authErrorMessage.classList.add('hidden');
+        }, 3000);
+      }
+    });
+  </script>
+</body>
+</html>

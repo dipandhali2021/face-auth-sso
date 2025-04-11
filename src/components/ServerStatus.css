@@ -1,60 +1,116 @@
 .server-status {
-  margin: 10px 0;
-  padding: 10px 15px;
-  border-radius: 4px;
+  margin: 15px auto;
+  padding: 12px 18px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 14px;
   max-width: 600px;
-  margin: 0 auto;
+  font-family: 'Georgia', serif;
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
 }
 
 .server-status.checking {
   background-color: #f8f9fa;
   color: #6c757d;
   border: 1px solid #dee2e6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .server-status.online {
-  background-color: #d4edda;
+  background-color: #edf7ed;
   color: #155724;
-  border: 1px solid #c3e6cb;
+  border: 1px solid #d4edda;
+  box-shadow: 0 3px 10px rgba(21, 87, 36, 0.1);
+}
+
+.server-status.online:hover {
+  box-shadow: 0 5px 15px rgba(21, 87, 36, 0.15);
+  transform: translateY(-2px);
 }
 
 .server-status.offline {
-  background-color: #f8d7da;
+  background-color: #fdf2f2;
   color: #721c24;
   border: 1px solid #f5c6cb;
   flex-direction: column;
   align-items: flex-start;
+  box-shadow: 0 3px 10px rgba(114, 28, 36, 0.1);
+}
+
+.server-status.offline:hover {
+  box-shadow: 0 5px 15px rgba(114, 28, 36, 0.15);
 }
 
 .status-indicator {
   font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-indicator:before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 5px;
 }
 
 .server-status.online .status-indicator {
   color: #28a745;
 }
 
+.server-status.online .status-indicator:before {
+  background-color: #28a745;
+  box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+}
+
 .server-status.offline .status-indicator {
   color: #dc3545;
 }
 
+.server-status.offline .status-indicator:before {
+  background-color: #dc3545;
+  box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.2);
+}
+
+.server-status.checking .status-indicator:before {
+  background-color: #ffc107;
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.2);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
 .server-error {
-  margin-top: 8px;
+  margin-top: 10px;
   font-weight: bold;
+  font-style: italic;
+  padding-left: 10px;
+  border-left: 2px solid #dc3545;
 }
 
 .server-tips {
-  margin-top: 12px;
+  margin-top: 15px;
   font-size: 13px;
+  background-color: #f8f9fa;
+  padding: 10px 15px;
+  border-radius: 6px;
+  border-left: 3px solid #17a2b8;
 }
 
 .server-tips p {
-  margin-bottom: 5px;
+  margin-bottom: 8px;
   font-weight: bold;
+  color: #17a2b8;
 }
 
 .server-tips ul {
@@ -63,5 +119,6 @@
 }
 
 .server-tips li {
-  margin-bottom: 4px;
+  margin-bottom: 5px;
+  line-height: 1.5;
 }

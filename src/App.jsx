@@ -52,10 +52,14 @@ function App() {
   return (
     <Router>
       <div className="App">
-        <h1>Face Authentication App</h1>
-        
-        {/* Server status indicator */}
-        <ServerStatus />
+        <header>
+          <h1>
+            <span className="title-accent">Face</span> Authentication App
+          </h1>
+          
+          {/* Server status indicator */}
+          <ServerStatus />
+        </header>
         
         {/* Component toggler */}
         <div className="toggle-container">
@@ -79,7 +83,7 @@ function App() {
             <div>
               {error ? (
                 <div className="error-message">
-                  <p>{error}</p>
+                  <p><span role="img" aria-label="Warning">⚠️</span> {error}</p>
                 </div>
               ) : modelsLoaded ? (
                 <div className="app-container">
@@ -98,7 +102,10 @@ function App() {
                   )}
                 </div>
               ) : (
-                <p>Loading face recognition models...</p>
+                <div className="loading-container">
+                  <div className="loading-spinner"></div>
+                  <p className="loading-text">Loading face recognition models...</p>
+                </div>
               )}
             </div>
           } />
@@ -115,6 +122,10 @@ function App() {
             </div>
           } />
         </Routes>
+        
+        <footer>
+          <p>© {new Date().getFullYear()} Face Authentication System</p>
+        </footer>
       </div>
     </Router>
   );

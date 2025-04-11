@@ -1,6 +1,10 @@
 // Cloudinary integration for profile picture uploads
 import { v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'stream';
+import dotenv from 'dotenv';
+
+// Load environment variables directly in this module
+dotenv.config();
 
 // Configure Cloudinary with credentials from environment variables
 cloudinary.config({
@@ -61,7 +65,28 @@ function getUserProfileImageUrl(userId) {
   });
 }
 
+/**
+ * Delete an image from Cloudinary by public ID
+ * @param {string} publicId - The public ID of the image to delete
+ * @returns {Promise<Object>} - Cloudinary deletion result
+ */
+async function deleteImageFromCloudinary(publicId) {
+  try {
+    // Check if the publicId already contains the folder path
+    const fullPublicId = publicId.includes('face-auth-profiles/') 
+      ? publicId 
+      : `face-auth-profiles/${publicId}`;
+      
+    const result = await cloudinary.uploader.destroy(fullPublicId);
+    return result;
+  } catch (error) {
+    console.error(`Error deleting image from Cloudinary (publicId: ${publicId}):`, error);
+    throw error;
+  }
+}
+
 export {
   uploadImageToCloudinary,
-  getUserProfileImageUrl
+  getUserProfileImageUrl,
+  deleteImageFromCloudinary
 };

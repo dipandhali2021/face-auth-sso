@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
-import multer from 'multer';
+import multer from 'multer'; // Re-adding the multer import
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import dotenv from 'dotenv';
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { connectDB, User, FaceProfile, Token, AuthCode } from './utils/db.js';
 import * as faceRecognition from './utils/faceRecognition.js';
 import * as cloudinary from './utils/cloudinary.js';
+import { upload, handleImageUpload, cleanupLocalImage, UPLOAD_DIR } from './utils/imageStorage.js';
 
 // ES Module dirname equivalent
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,6 +90,18 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 
+// Admin authentication middleware for secure endpoints
+const authenticateAdmin = (req, res, next) => {
+  const adminToken = req.headers['x-admin-token'];
+  const validAdminToken = process.env.ADMIN_SECRET_TOKEN || 'extremely-secret-admin-token-for-development-only';
+  
+  if (!adminToken || adminToken !== validAdminToken) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'Invalid admin token' });
+  }
+  
+  next();
+};
+
 // Session middleware for maintaining login state
 app.use(
   session({
@@ -106,11 +119,7 @@ app.use(
 // Set up multer with memory storage for serverless environment
 const storage = multer.memoryStorage();
 
-const upload = multer({ storage });
-
-// Define a virtual path for uploads (will use Cloudinary instead of local filesystem)
-const uploadDir = '/tmp';
-// No need to create directory in serverless environment
+const uploadDir = process.env.NODE_ENV === 'production' ? '/tmp' : UPLOAD_DIR;
 
 // Connect to MongoDB
 connectDB()
@@ -384,23 +393,11 @@ app.post(
     console.time('faceAuthVerify');
     const { request, faceImage, action } = req.body;
     
-    // Performance monitoring
-    const startTime = Date.now();
-
     if (!request || !faceImage) {
       return res.status(400).send('Missing required parameters');
     }
 
-    // Define a cleanup function for session data
-    // In serverless environment, we don't need to clean up files
-    let filePath = null; // Keep for reference compatibility
-    const cleanupTempFile = () => {
-      // Clear session data instead of deleting files
-      if (req.session.tempFileName) {
-        delete req.session.tempFileName;
-        console.log('Temporary file reference cleared from session');
-      }
-    };
+    let tempFilePath = null;
 
     try {
       const authRequest = JSON.parse(Buffer.from(request, 'base64').toString());
@@ -408,32 +405,13 @@ app.post(
 
       // Convert base64 to buffer for processing
       const imageBuffer = Buffer.from(faceImage, 'base64');
-      const fileName = `${Date.now()}.jpg`;
-      
-      // In serverless environment, we don't save files locally
-      // Instead, we'll use the buffer directly and Cloudinary for storage
-      
-      // Store a reference in the session
-      req.session.tempFileName = fileName;
-
-      // Performance monitoring for face descriptor extraction
-      console.time('extractFaceDescriptor');
       
       // Extract face descriptor from the image
-      const faceDescriptor = await faceRecognition.extractFaceDescriptor(
-        imageBuffer
-      );
-      
+      console.time('extractFaceDescriptor');
+      const faceDescriptor = await faceRecognition.extractFaceDescriptor(imageBuffer);
       console.timeEnd('extractFaceDescriptor');
 
       if (!faceDescriptor) {
-        // No need to delete files in serverless environment
-        // Just clear the session data
-        if (req.session.tempFileName) {
-          delete req.session.tempFileName;
-          console.log('Temporary file reference cleared after no face detected');
-        }
-        // Serve the error page for face verification failure
         return res
           .status(400)
           .sendFile(path.join(__dirname, 'public', 'face-auth-error.html'));
@@ -448,35 +426,19 @@ app.post(
         userId = generateRandomString(16);
         isNewUser = true;
 
-        // Upload image to Cloudinary
-        let cloudinaryResult;
-        try {
-          cloudinaryResult = await cloudinary.uploadImageToCloudinary(
-            imageBuffer,
-            userId
-          );
-          console.log(
-            'Image uploaded to Cloudinary:',
-            cloudinaryResult.secure_url
-          );
-
-          // No need to delete files in serverless environment
-          if (cloudinaryResult) {
-            console.log(
-              'Image successfully uploaded to Cloudinary:',
-              cloudinaryResult.secure_url
-            );
-          }
-        } catch (cloudinaryError) {
-          console.error('Cloudinary upload failed:', cloudinaryError);
-          // Continue with local file if Cloudinary fails
+        // Store the image based on environment (local in dev, Cloudinary in prod)
+        const imageUploadResult = await handleImageUpload(imageBuffer, userId);
+        
+        // Store the file path for potential cleanup
+        if (process.env.NODE_ENV !== 'production' && imageUploadResult.filePath) {
+          tempFilePath = imageUploadResult.filePath;
+          req.session.tempFilePath = tempFilePath;
         }
 
         // Create a new face profile with the descriptor
         const faceProfile = new FaceProfile({
           userId: userId,
-          // Use Cloudinary URL instead of local file path
-          faceImagePath: cloudinaryResult ? cloudinaryResult.secure_url : null,
+          faceImagePath: imageUploadResult.url,
           faceDescriptor: Array.from(faceDescriptor), // Convert Float32Array to regular array for MongoDB
           registeredAt: new Date(),
         });
@@ -485,7 +447,6 @@ app.post(
         await faceProfile.save();
 
         // Get user data from session if available (from registration form)
-        // Or from the form submission if session data is not available
         let userData = req.session.userData || {
           firstName: req.body.firstName || null,
           lastName: req.body.lastName || null,
@@ -493,7 +454,7 @@ app.post(
           emailVerified: true
         };
 
-        // Create a new user with information from the registration form or generate defaults
+        // Create a new user with information from the registration form
         user = new User({
           id: userId,
           name:
@@ -508,9 +469,7 @@ app.post(
               ? userData.emailVerified
               : true,
           faceVerified: true,
-          profilePicture: cloudinaryResult
-            ? cloudinaryResult.secure_url
-            : null,
+          profilePicture: imageUploadResult.url,
           registeredAt: new Date(),
           updatedAt: new Date(),
           faceProfileId: userId,
@@ -528,15 +487,6 @@ app.post(
         const faceProfiles = await FaceProfile.find({});
 
         if (faceProfiles.length === 0) {
-          // Delete the temporary file if no registered faces exist
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log(
-              'Temporary file deleted when no registered faces exist:',
-              filePath
-            );
-          }
-          // Redirect to the no-registered-faces page with the request data
           return res.redirect(
             `/no-registered-faces.html?request=${encodeURIComponent(request)}`
           );
@@ -549,15 +499,6 @@ app.post(
         );
 
         if (!matchResult) {
-          // Delete the temporary file if no matching face is found
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log(
-              'Temporary file deleted after no face match found:',
-              filePath
-            );
-          }
-          // Redirect to the face-match-failed page with the request data instead of error redirect
           return res.redirect(
             `/face-match-failed.html?request=${encodeURIComponent(request)}`
           );
@@ -573,26 +514,12 @@ app.post(
         user = await User.findOne({ id: userId });
 
         if (!user) {
-          // Delete the temporary file if no user is found for the face
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log(
-              'Temporary file deleted when no user found for face:',
-              filePath
-            );
-          }
           return res
             .status(401)
             .send('User not found for the authenticated face.');
         }
 
         console.log('User authenticated with face recognition:', userId);
-
-        // Delete the temporary file after authentication
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('Temporary file deleted after authentication:', filePath);
-        }
       }
 
       // Store authentication session
@@ -621,19 +548,18 @@ app.post(
         redirectUrl.searchParams.append('state', state);
       }
 
-      // End performance timing before redirecting
       console.timeEnd('faceAuthVerify');
       res.redirect(redirectUrl.toString());
     } catch (error) {
       console.error('Error processing face authentication:', error);
+      
       // Clean up temporary file in case of error
-      cleanupTempFile();
-      // End performance timing even in case of error
+      if (tempFilePath) {
+        cleanupLocalImage(tempFilePath);
+      }
+      
       console.timeEnd('faceAuthVerify');
       res.status(500).send('Authentication failed: ' + error.message);
-    } finally {
-      // Ensure cleanup happens even if there's an unhandled exception
-      cleanupTempFile();
     }
   }
 );
@@ -1023,6 +949,83 @@ app.post('/oauth/introspect', async (req, res) => {
   } catch (error) {
     console.error('Error introspecting token:', error);
     res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// ADMIN ENDPOINTS - PROTECTED BY SECURE TOKEN
+// Endpoint to delete all MongoDB data and Cloudinary uploads
+app.delete('/api/admin/delete-all-data', authenticateAdmin, async (req, res) => {
+  try {
+    // Step 1: Get all face profiles to retrieve Cloudinary public IDs
+    const faceProfiles = await FaceProfile.find({});
+    console.log(`Found ${faceProfiles.length} face profiles to delete`);
+    
+    // Step 2: Extract Cloudinary public IDs from image URLs
+    const cloudinaryPromises = faceProfiles.map(profile => {
+      // Only process Cloudinary URLs (not local file paths)
+      if (profile.faceImagePath && profile.faceImagePath.includes('cloudinary.com')) {
+        try {
+          // Extract public_id from Cloudinary URL
+          // Format usually: https://res.cloudinary.com/[cloud_name]/image/upload/v[version]/[public_id]
+          const urlParts = profile.faceImagePath.split('/');
+          const fileName = urlParts[urlParts.length - 1];
+          const publicId = fileName.split('.')[0]; // Remove file extension if any
+          
+          return cloudinary.deleteImageFromCloudinary(publicId);
+        } catch (err) {
+          console.error(`Failed to delete Cloudinary image for user ${profile.userId}:`, err);
+          return Promise.resolve(); // Continue with other deletions
+        }
+      }
+      return Promise.resolve(); // Skip non-Cloudinary URLs
+    });
+    
+    // Step 3: Delete all Cloudinary images
+    await Promise.all(cloudinaryPromises);
+    console.log('All Cloudinary images deleted successfully');
+    
+    // Step 4: Delete all MongoDB collections data
+    const deleteUsers = await User.deleteMany({});
+    const deleteFaceProfiles = await FaceProfile.deleteMany({});
+    const deleteTokens = await Token.deleteMany({});
+    const deleteAuthCodes = await AuthCode.deleteMany({});
+    
+    console.log('MongoDB data deletion results:', {
+      users: deleteUsers.deletedCount,
+      faceProfiles: deleteFaceProfiles.deletedCount,
+      tokens: deleteTokens.deletedCount,
+      authCodes: deleteAuthCodes.deletedCount
+    });
+    
+    // Step 5: Delete any local uploaded files if in development
+    if (process.env.NODE_ENV !== 'production' && fs.existsSync(UPLOAD_DIR)) {
+      const files = fs.readdirSync(UPLOAD_DIR);
+      for (const file of files) {
+        if (file !== '.gitkeep' && file !== 'README.md') { // Preserve special files
+          fs.unlinkSync(path.join(UPLOAD_DIR, file));
+        }
+      }
+      console.log(`Deleted ${files.length} local uploaded files`);
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: 'All data deleted successfully',
+      details: {
+        usersDeleted: deleteUsers.deletedCount,
+        faceProfilesDeleted: deleteFaceProfiles.deletedCount,
+        tokensDeleted: deleteTokens.deletedCount,
+        authCodesDeleted: deleteAuthCodes.deletedCount,
+        cloudinaryImagesDeleted: faceProfiles.length
+      }
+    });
+  } catch (error) {
+    console.error('Error deleting all data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete all data',
+      error: error.message
+    });
   }
 });
 
