@@ -29,6 +29,7 @@ const clients = {
       'http://localhost:5173/oauth/callback',  // Vite development server
       'http://localhost:5001/oauth/callback',  // OAuth server
       'https://dapi.clerk.com/v1/oauth_debug/callback',
+      'https://prime-stallion-8.clerk.accounts.dev/v1/oauth_callback'
     ],
     grants: ['authorization_code'],
     scopes: ['openid', 'profile'],
