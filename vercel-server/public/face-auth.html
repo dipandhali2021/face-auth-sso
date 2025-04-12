@@ -59,6 +59,7 @@
         border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        position: relative;
       }
       #video { 
         width: 100%;
@@ -66,6 +67,7 @@
         border-radius: 8px;
         display: block;
         margin: 0 auto;
+        transform: scaleX(-1); /* Mirror for more natural experience */
       }
       .btn { 
         background: #666; 
@@ -77,9 +79,13 @@
         border: none;
         cursor: pointer;
         font-size: 14px;
+        transition: background-color 0.2s ease, transform 0.1s ease;
       }
       .btn:hover {
         background: #555;
+      }
+      .btn:active {
+        transform: scale(0.98);
       }
       .btn:disabled {
         opacity: 0.6;
@@ -176,6 +182,21 @@
         opacity: 0.8;
       }
 
+      /* Face guide overlay */
+      .face-guide {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 200px;
+        height: 200px;
+        border: 2px dashed rgba(52, 168, 83, 0.5);
+        border-radius: 50%;
+        pointer-events: none;
+        opacity: 0.7;
+        box-sizing: border-box;
+      }
+
       /* Counter animation */
       .counter {
         position: absolute;
@@ -194,18 +215,37 @@
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.2s;
+        z-index: 5;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      }
+
+      @keyframes pulse {
+        0% { transform: translate(-50%, -50%) scale(1); }
+        50% { transform: translate(-50%, -50%) scale(1.05); }
+        100% { transform: translate(-50%, -50%) scale(1); }
       }
 
       .counter.show {
         opacity: 1;
-        animation: count-down 3s forwards;
+        animation: pulse 1s infinite;
       }
 
-      @keyframes count-down {
-        0% { content: "3"; }
-        33% { content: "2"; }
-        66% { content: "1"; }
-        100% { content: ""; }
+      .face-status {
+        position: absolute;
+        bottom: 5px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 10px;
+        background-color: rgba(0,0,0,0.5);
+        color: white;
+        border-radius: 10px;
+        font-size: 12px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      .face-status.show {
+        opacity: 1;
       }
     </style>
   </head>
@@ -216,8 +256,10 @@
       <p class="subtitle">Please look at the camera to authenticate</p>
       
       <div id="video-container">
-        <video id="video" width="400" height="300" autoplay></video>
+        <video id="video" width="400" height="300" autoplay playsinline></video>
         <canvas id="canvas" width="400" height="300" style="display:none;"></canvas>
+        <div class="face-guide"></div>
+        <div class="face-status">Position your face in the circle</div>
       </div>
       
       <div>
@@ -253,6 +295,7 @@
       const actionTypeInput = document.getElementById('action-type');
       const authenticateBtn = document.getElementById('authenticate-btn');
       const registerBtn = document.getElementById('register-btn');
+      const faceStatus = document.querySelector('.face-status');
       
       // Create loading overlay
       const loadingContainer = document.createElement('div');
@@ -289,6 +332,15 @@
       // Face detection variables
       let faceDetectionInterval;
       let currentFaceDetected = false;
+      let lastDetectionTime = 0;
+      let faceDetectSkipFrames = 0;
+      let consecutiveFaceDetections = 0;
+      
+      // Detection optimization settings
+      const DETECTION_INTERVAL = 150; // ms between detection attempts
+      const SKIP_FRAMES = 2; // Process only every N frames for better performance
+      const REQUIRED_CONSECUTIVE_DETECTIONS = 3; // Require N consecutive detections for stability
+      const FACE_DETECTION_CONFIDENCE = 0.4; // Lower threshold for faster detection
       
       // Update progress bar
       function updateProgress(percent) {
@@ -309,13 +361,19 @@
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
           video.srcObject = stream;
           
+          // Update video and canvas dimensions
+          video.onloadedmetadata = () => {
+            const videoAspect = video.videoWidth / video.videoHeight;
+            // Keep height fixed and adjust width to maintain aspect ratio
+            canvas.width = canvas.height * videoAspect;
+            video.play();
+            loadingProgress.textContent = 'Camera ready';
+            updateProgress(40);
+          };
+          
+          // Return promise that resolves when video is playing
           return new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-              video.play();
-              loadingProgress.textContent = 'Camera ready';
-              updateProgress(40);
-              resolve();
-            };
+            video.onplaying = resolve;
           });
         } catch (err) {
           console.error('Error accessing camera:', err);
@@ -325,61 +383,88 @@
         }
       }
       
-      // Face detection function using the shared loader
+      // Face detection function using the shared loader with optimizations
       function startFaceDetection() {
         if (faceDetectionInterval) clearInterval(faceDetectionInterval);
         
         faceDetectionInterval = setInterval(async () => {
+          // Skip if video isn't ready
           if (video.paused || video.ended) return;
           
+          // Skip frames for better performance
+          if (faceDetectSkipFrames < SKIP_FRAMES) {
+            faceDetectSkipFrames++;
+            return;
+          }
+          
+          faceDetectSkipFrames = 0;
+          const now = Date.now();
+          
+          // Don't run detection too frequently
+          if (now - lastDetectionTime < DETECTION_INTERVAL) return;
+          lastDetectionTime = now;
+          
           try {
-            // Always attempt detection regardless of faceDetectionReady flag
-            // The detectFaces function will handle initialization if needed
-            const detections = await window.FaceAPILoader.detectFaces(video);
+            // Detect faces with optimized options
+            const detectionOptions = {
+              scoreThreshold: FACE_DETECTION_CONFIDENCE,
+              inputSize: 128, // Small input size for faster processing
+              useTinyModel: true
+            };
+            
+            // Use shared detection API for performance
+            const detections = await window.FaceAPILoader.detectFaces(video, detectionOptions);
             
             // Update UI based on face detection
             const hasFace = detections.length > 0;
             
-            if (hasFace !== currentFaceDetected) {
-              currentFaceDetected = hasFace;
-              
-              if (hasFace) {
-                // Visual indicator that face is detected
-                video.style.border = '3px solid #34a853';
-                
-                // Enable buttons
-                authenticateBtn.disabled = false;
-                registerBtn.disabled = false;
-                
-                // Don't show face boxes in authentication screen
-                // Keep face detection active but don't display the boxes
-              } else {
-                // Remove face indicator
-                video.style.border = '';
-                authenticateBtn.disabled = true;
-                registerBtn.disabled = true;
+            // Debounce face detection for stability
+            if (hasFace) {
+              consecutiveFaceDetections++;
+              if (consecutiveFaceDetections >= REQUIRED_CONSECUTIVE_DETECTIONS && !currentFaceDetected) {
+                currentFaceDetected = true;
+                updateFaceUI(true);
+              }
+            } else {
+              consecutiveFaceDetections = 0;
+              if (currentFaceDetected) {
+                currentFaceDetected = false;
+                updateFaceUI(false);
               }
             }
           } catch (error) {
             console.error('Face detection error:', error);
-            // If we get an error, try to force reload models
+            // If we get an error, try to reload models only if they're not loading already
             if (!window.FaceAPI.modelLoadingPromise) {
-              console.log('Detection failed, attempting to reload models');
-              window.FaceAPILoader.forceReloadModels(updateProgress)
-                .then(() => {
-                  console.log('Models reloaded after detection failure');
-                })
-                .catch(err => console.error('Model reload failed:', err));
+              window.FaceAPILoader.forceReloadModels(updateProgress);
             }
           }
-        }, 200);
+        }, Math.floor(1000 / 15)); // ~15 FPS detection rate maximum
       }
       
-      // Add visual face boxes - not used in authentication screen
-      function updateFaceBoxes(detections) {
-        // Function kept for compatibility but not used in authentication screen
-        // This ensures we can still use it in other pages if needed
-        console.log("Face detected but boxes not shown in authentication");
+      // Update UI based on face detection status
+      function updateFaceUI(hasFace) {
+        if (hasFace) {
+          // Visual indicators that face is detected
+          video.style.border = '3px solid #34a853';
+          faceStatus.textContent = 'Face Detected';
+          faceStatus.style.backgroundColor = 'rgba(52, 168, 83, 0.7)';
+          faceStatus.classList.add('show');
+          
+          // Enable buttons
+          authenticateBtn.disabled = false;
+          registerBtn.disabled = false;
+        } else {
+          // Remove face indicators
+          video.style.border = '';
+          faceStatus.textContent = 'No face detected';
+          faceStatus.style.backgroundColor = 'rgba(220, 0, 0, 0.7)';
+          faceStatus.classList.add('show');
+          
+          // Disable buttons
+          authenticateBtn.disabled = true;
+          registerBtn.disabled = true;
+        }
       }
       
       // Create countdown element
@@ -387,11 +472,11 @@
       countdownElement.className = 'counter';
       videoContainer.appendChild(countdownElement);
       
-      // Capture face image with improved quality and countdown
+      // Capture face image with improved quality and fast processing
       function captureFace(action) {
         if (!currentFaceDetected) {
           loadingText.textContent = 'No Face Detected';
-          loadingProgress.textContent = 'Please position your face in front of the camera';
+          loadingProgress.textContent = 'Please position your face in the circle';
           loadingContainer.style.display = 'flex';
           setTimeout(() => loadingContainer.style.display = 'none', 1500);
           return;
@@ -402,105 +487,101 @@
         registerBtn.disabled = true;
         
         if (action === 'authenticate') {
-          // Use countdown only for authentication
-          // Start countdown animation
-          let count = 3;
-          countdownElement.textContent = count;
-          countdownElement.style.opacity = '1';
+          // Fast capture without countdown for better user experience
+          countdownElement.textContent = '';
+          countdownElement.classList.add('show');
           
-          const countdownInterval = setInterval(() => {
-            count--;
-            if (count > 0) {
-              countdownElement.textContent = count;
-            } else {
-              clearInterval(countdownInterval);
-              countdownElement.style.opacity = '0';
-              
-              // Show processing indicator
-              loadingText.textContent = 'Processing Your Face...';
-              loadingProgress.textContent = 'Please wait';
-              loadingContainer.style.display = 'flex';
-              
-              // Capture at high quality
-              const context = canvas.getContext('2d');
-              context.drawImage(video, 0, 0, canvas.width, canvas.height);
-              
-              // Get image data with better quality
-              const imageData = canvas.toDataURL('image/jpeg', 0.9);
-              faceImageInput.value = imageData.split(',')[1];
-              actionTypeInput.value = action;
-              
-              // For authentication
-              updateProgress(90);
-              loadingProgress.textContent = 'Authenticating...';
-              setTimeout(() => authForm.submit(), 300);
-            }
-          }, 1000);
+          // Show processing indicator
+          loadingText.textContent = 'Authenticating...';
+          loadingProgress.textContent = 'This will just take a moment';
+          loadingContainer.style.display = 'flex';
+          
+          // Capture image immediately
+          setTimeout(() => {
+            // Capture at optimal quality (lower quality = faster processing)
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Get image data with balanced quality (0.85 instead of 0.9)
+            const imageData = canvas.toDataURL('image/jpeg', 0.85); 
+            faceImageInput.value = imageData.split(',')[1];
+            actionTypeInput.value = action;
+            
+            // Submit form for authentication
+            updateProgress(90);
+            loadingProgress.textContent = 'Verifying your face...';
+            countdownElement.classList.remove('show');
+            
+            // Submit with slight delay to allow UI updates
+            setTimeout(() => authForm.submit(), 200);
+          }, 300);
         } else if (action === 'register') {
-          // For registration - redirect directly to register page without countdown
-          // Redirect immediately to registration page with request data
+          // For registration - redirect directly to register page
           window.location.href = '/register?request=' + encodeURIComponent(requestData);
         }
       }
       
-      // Initialize face authentication
+      // Initialize face authentication with optimized loading sequence
       async function initFaceAuth() {
         try {
           // Start video first for better user experience
           await startVideo();
+          updateProgress(30);
           
-          // Check if models are already loaded from cache
+          // Attempt to run a faster model initialization path
           if (window.FaceAPI.faceDetectionReady) {
-            console.log('Using cached face detection models');
             loadingText.textContent = 'Initializing...';
             loadingProgress.textContent = 'Using cached models';
             updateProgress(70);
             
-            // Start face detection immediately
+            // Start detection immediately with cached models
             startFaceDetection();
             
-            // Fade out loading overlay gradually
+            // Hide loading overlay quickly
             setTimeout(() => {
               loadingContainer.style.opacity = '0';
-              loadingContainer.style.transition = 'opacity 0.5s ease';
-              setTimeout(() => loadingContainer.style.display = 'none', 500);
-            }, 1000);
+              loadingContainer.style.transition = 'opacity 0.3s ease';
+              setTimeout(() => loadingContainer.style.display = 'none', 300);
+            }, 500);
           } else {
-            // Load models with progress updates
-            window.FaceAPILoader.loadFaceApiModels(updateProgress)
-              .then(() => {
-                loadingText.textContent = 'Face Detection Ready';
-                loadingProgress.textContent = 'You can now authenticate';
-                
-                // Start face detection after models are loaded
-                startFaceDetection();
-                
-                // Fade out loading overlay
-                setTimeout(() => {
-                  loadingContainer.style.opacity = '0';
-                  loadingContainer.style.transition = 'opacity 0.5s ease';
-                  setTimeout(() => loadingContainer.style.display = 'none', 500);
-                }, 500);
-              })
-              .catch(error => {
-                console.error('Error loading models:', error);
-                loadingText.textContent = 'Error Loading Face Detection';
-                loadingProgress.textContent = 'Please refresh the page and try again';
-                
-                // Add a reset button
-                const resetBtn = document.createElement('button');
-                resetBtn.innerText = 'Reset and try again';
-                resetBtn.className = 'btn';
-                resetBtn.style.marginTop = '15px';
-                resetBtn.onclick = () => {
-                  window.FaceAPILoader.forceReloadModels(updateProgress);
-                  loadingText.textContent = 'Reloading models...';
-                  loadingContainer.removeChild(resetBtn);
-                };
-                loadingContainer.appendChild(resetBtn);
-              });
+            // Load models with minimal configuration for faster startup
+            window.FaceAPILoader.loadFaceApiModels(updateProgress, {
+              useOptimizedModels: true, // Only load necessary models
+              skipExpressions: true,    // Skip expression detection for speed
+              preferredFaceDetector: 'tiny' // Use tiny model for speed
+            })
+            .then(() => {
+              loadingText.textContent = 'Face Detection Ready';
+              loadingProgress.textContent = 'You can now authenticate';
+              
+              // Start face detection
+              startFaceDetection();
+              
+              // Fade out loading overlay
+              setTimeout(() => {
+                loadingContainer.style.opacity = '0';
+                loadingContainer.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => loadingContainer.style.display = 'none', 300);
+              }, 300);
+            })
+            .catch(error => {
+              console.error('Error loading models:', error);
+              loadingText.textContent = 'Error Loading Face Detection';
+              loadingProgress.textContent = 'Please refresh the page and try again';
+              
+              // Add a reset button
+              const resetBtn = document.createElement('button');
+              resetBtn.innerText = 'Reset and try again';
+              resetBtn.className = 'btn';
+              resetBtn.style.marginTop = '15px';
+              resetBtn.onclick = () => {
+                window.FaceAPILoader.forceReloadModels(updateProgress);
+                loadingText.textContent = 'Reloading models...';
+                loadingContainer.removeChild(resetBtn);
+              };
+              loadingContainer.appendChild(resetBtn);
+            });
           }
-          
         } catch (error) {
           console.error('Initialization error:', error);
           loadingText.textContent = 'Initialization Error';
@@ -508,17 +589,7 @@
         }
       }
       
-      // Listen for model load events
-      window.addEventListener('faceApiModelsLoaded', function() {
-        console.log('Models loaded event received');
-        // Enable buttons if face is detected
-        if (currentFaceDetected) {
-          authenticateBtn.disabled = false;
-          registerBtn.disabled = false;
-        }
-      });
-      
-      // Clean up resources when leaving
+      // Resource cleanup
       window.addEventListener('beforeunload', () => {
         if (faceDetectionInterval) {
           clearInterval(faceDetectionInterval);
@@ -530,23 +601,6 @@
           tracks.forEach(track => track.stop());
         }
       });
-      
-      // Add debug button (hidden in production)
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-        const debugBtn = document.createElement('button');
-        debugBtn.innerText = 'Debug Models';
-        debugBtn.style.position = 'fixed';
-        debugBtn.style.bottom = '10px';
-        debugBtn.style.right = '10px';
-        debugBtn.style.fontSize = '12px';
-        debugBtn.style.padding = '5px';
-        debugBtn.style.opacity = '0.7';
-        debugBtn.onclick = () => {
-          const status = window.FaceAPILoader.debugModelStatus();
-          alert(JSON.stringify(status, null, 2));
-        };
-        document.body.appendChild(debugBtn);
-      }
       
       // Event listeners
       authenticateBtn.addEventListener('click', () => captureFace('authenticate'));

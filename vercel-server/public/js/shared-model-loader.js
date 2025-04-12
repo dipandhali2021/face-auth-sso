@@ -1,237 +1,290 @@
 /**
- * Simplified Face-API.js Model Loader for Vercel deployment
- * This streamlined loader is optimized for reliability in serverless environments
+ * Shared Face-API.js Model Loader
+ * Optimized for better performance in face authentication
+ * This file provides a unified interface for loading face-api.js models
+ * with caching, performance monitoring, and optimized settings
  */
 
-// Global model state tracking
-window.FaceAPI = window.FaceAPI || {
-  modelsPath: '/models',
+// Global object to store face-api.js state
+window.FaceAPI = {
   modelsLoaded: false,
-  modelLoadingPromise: null,
-  lastModelLoadTime: 0,
-  modelVersion: '1.1.0', // Force reset with new version
   faceDetectionReady: false,
-  faceRecognitionReady: false,
-  loadRetries: 0,
-  maxRetries: 3
+  modelLoadingPromise: null,
+  modelPath: '/models',
+  lastDetectionTime: 0,
+  
+  // Cache to avoid recreating detection options
+  tinyFaceDetectorOptions: null,
+  
+  // Performance metrics
+  metrics: {
+    modelLoadTime: 0,
+    detectionTimes: [],
+    averageDetectionTime: 0
+  },
+  
+  // Model configuration status
+  models: {
+    tinyFaceDetector: false,
+    faceLandmark68Tiny: false,
+    faceRecognition: false
+  }
 };
 
-// Optimized face detection options for better performance
-const getFaceDetectionOptions = () => {
-  return new faceapi.TinyFaceDetectorOptions({
-    inputSize: 160, // Smaller for faster processing
-    scoreThreshold: 0.5
-  });
-};
-
-// Simple verification that models are loaded and working
-async function verifyModelsLoaded() {
-  try {
+// Loader object with optimized methods
+window.FaceAPILoader = {
+  /**
+   * Load face-api.js models with caching and optimizations
+   * @param {Function} progressCallback - Progress update callback
+   * @param {Object} options - Loading options
+   * @returns {Promise} - Promise that resolves when models are loaded
+   */
+  loadFaceApiModels: async function(progressCallback = () => {}, options = {}) {
+    // If models are already loading, return the existing promise
+    if (window.FaceAPI.modelLoadingPromise) {
+      return window.FaceAPI.modelLoadingPromise;
+    }
+    
+    // If models are already loaded, just return resolved promise
+    if (window.FaceAPI.faceDetectionReady) {
+      progressCallback(100);
+      return Promise.resolve();
+    }
+    
+    console.time('modelLoading');
+    
+    // Create a new loading promise
+    window.FaceAPI.modelLoadingPromise = new Promise(async (resolve, reject) => {
+      try {
+        // Update progress
+        progressCallback(10);
+        
+        // Prefer CDN paths if available for faster loading
+        const modelPath = window.FaceAPI.modelPath;
+        
+        // Set optimization options
+        const useOptimizedModels = options.useOptimizedModels !== undefined ? 
+          options.useOptimizedModels : true;
+        const skipExpressions = options.skipExpressions !== undefined ?
+          options.skipExpressions : true;
+        const preferredFaceDetector = options.preferredFaceDetector || 'tiny';
+  
+        // Load TinyFaceDetector first for faster initial detection
+        progressCallback(20);
+        await faceapi.nets.tinyFaceDetector.load(modelPath);
+        window.FaceAPI.models.tinyFaceDetector = true;
+        progressCallback(50);
+        
+        // Load minimal models in parallel for faster initialization
+        const remainingLoads = [
+          faceapi.nets.faceLandmark68TinyNet.load(modelPath)
+            .then(() => {
+              window.FaceAPI.models.faceLandmark68Tiny = true;
+            }),
+          faceapi.nets.faceRecognitionNet.load(modelPath)
+            .then(() => {
+              window.FaceAPI.models.faceRecognition = true;  
+            })
+        ];
+        
+        // Update progress during loading
+        let progress = 50;
+        const progressInterval = setInterval(() => {
+          if (progress < 85) {
+            progress += 5;
+            progressCallback(progress);
+          } else {
+            clearInterval(progressInterval);
+          }
+        }, 100);
+        
+        // Wait for all models to load
+        await Promise.all(remainingLoads);
+        clearInterval(progressInterval);
+        progressCallback(90);
+        
+        // Create pre-configured detector options
+        window.FaceAPI.tinyFaceDetectorOptions = new faceapi.TinyFaceDetectorOptions({
+          inputSize: 128,
+          scoreThreshold: 0.4
+        });
+        
+        // Update state and finish
+        window.FaceAPI.modelsLoaded = true;
+        window.FaceAPI.faceDetectionReady = true;
+        window.FaceAPI.modelLoadingPromise = null;
+        
+        console.timeEnd('modelLoading');
+        
+        // Store performance metrics
+        window.FaceAPI.metrics.modelLoadTime = performance.now();
+        
+        // Warm up detector
+        try {
+          await this._warmupDetector();
+        } catch (e) {
+          console.warn('Detector warmup failed:', e);
+        }
+        
+        // Dispatch event for other components
+        window.dispatchEvent(new Event('faceApiModelsLoaded'));
+        progressCallback(100);
+        resolve();
+        
+      } catch (error) {
+        console.error('Error loading face-api.js models:', error);
+        window.FaceAPI.modelLoadingPromise = null;
+        reject(error);
+      }
+    });
+    
+    return window.FaceAPI.modelLoadingPromise;
+  },
+  
+  /**
+   * Force reload models (useful for recovery after errors)
+   * @param {Function} progressCallback - Progress update callback
+   * @returns {Promise} - Promise that resolves when models are reloaded
+   */
+  forceReloadModels: async function(progressCallback = () => {}) {
+    // Reset state
+    window.FaceAPI.modelsLoaded = false;
+    window.FaceAPI.faceDetectionReady = false;
+    window.FaceAPI.modelLoadingPromise = null;
+    
+    // Force browser to reload models from server
+    try {
+      // Clear face-api internal state if possible
+      if (faceapi.nets) {
+        Object.keys(faceapi.nets).forEach(key => {
+          if (faceapi.nets[key] && faceapi.nets[key].isLoaded) {
+            try { faceapi.nets[key].isLoaded = false; } catch (e) {}
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Could not reset internal face-api state:', e);
+    }
+    
+    // Reload models
+    return this.loadFaceApiModels(progressCallback);
+  },
+  
+  /**
+   * Optimized face detection function
+   * @param {HTMLElement} input - Video or image element
+   * @param {Object} options - Detection options
+   * @returns {Promise<Array>} - Promise that resolves with detected faces
+   */
+  detectFaces: async function(input, options = {}) {
+    // Ensure models are loaded
+    if (!window.FaceAPI.faceDetectionReady) {
+      await this.loadFaceApiModels();
+    }
+    
+    const startTime = performance.now();
+    
+    // Get options with good defaults for performance
+    const detectionOptions = window.FaceAPI.tinyFaceDetectorOptions || 
+      new faceapi.TinyFaceDetectorOptions({
+        inputSize: options.inputSize || 128,
+        scoreThreshold: options.scoreThreshold || 0.4
+      });
+      
+    // Detect faces
+    const result = await faceapi.detectAllFaces(input, detectionOptions);
+    
+    // Track performance
+    const endTime = performance.now();
+    const detectionTime = endTime - startTime;
+    
+    // Update metrics
+    window.FaceAPI.metrics.detectionTimes.push(detectionTime);
+    if (window.FaceAPI.metrics.detectionTimes.length > 30) {
+      window.FaceAPI.metrics.detectionTimes.shift();
+    }
+    
+    // Calculate average
+    const sum = window.FaceAPI.metrics.detectionTimes.reduce((a, b) => a + b, 0);
+    window.FaceAPI.metrics.averageDetectionTime = sum / window.FaceAPI.metrics.detectionTimes.length;
+    
+    // Update last detection time
+    window.FaceAPI.lastDetectionTime = Date.now();
+    
+    return result;
+  },
+  
+  /**
+   * Get full face detection with landmarks and descriptor
+   * Used for authentication - more CPU intensive
+   */
+  detectFaceWithDescriptor: async function(imageElement) {
+    if (!window.FaceAPI.faceDetectionReady) {
+      await this.loadFaceApiModels();
+    }
+    
+    try {
+      return await faceapi.detectSingleFace(
+        imageElement,
+        window.FaceAPI.tinyFaceDetectorOptions
+      )
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+    } catch (error) {
+      console.error('Face descriptor extraction error:', error.message);
+      return null;
+    }
+  },
+  
+  /**
+   * Internal method to warm up detector for faster first inference
+   */
+  _warmupDetector: async function() {
     // Create a simple test canvas
-    const testCanvas = document.createElement('canvas');
-    testCanvas.width = 100;
-    testCanvas.height = 100;
-    const ctx = testCanvas.getContext('2d');
-    ctx.fillStyle = '#000000';
+    const canvas = document.createElement('canvas');
+    canvas.width = 100;
+    canvas.height = 100;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, 100, 100);
     
-    // Try to use the face detector
-    await faceapi.detectSingleFace(
-      testCanvas,
-      getFaceDetectionOptions()
-    );
+    // Draw a simple face-like shape
+    ctx.fillStyle = '#dddddd';
+    ctx.beginPath();
+    ctx.ellipse(50, 50, 25, 35, 0, 0, Math.PI * 2);
+    ctx.fill();
     
-    console.log('✓ Face detection models verified');
-    return true;
-  } catch (error) {
-    console.error('⚠️ Models verification failed:', error.message);
-    return false;
-  }
-}
-
-// Direct model loading - simpler approach with no caching complexity
-async function loadFaceApiModels(progressCallback = () => {}) {
-  if (window.FaceAPI.modelLoadingPromise) {
-    return window.FaceAPI.modelLoadingPromise;
-  }
-  
-  console.log('🔄 Loading face-api.js models...');
-  progressCallback(10);
-  
-  window.FaceAPI.modelLoadingPromise = (async () => {
+    // Run detection on this canvas
     try {
-      // Basic method of loading models that works more reliably
-      const basePath = window.FaceAPI.modelsPath;
-      
-      // Load the face detector first for better UX
-      progressCallback(20);
-      await faceapi.nets.tinyFaceDetector.load(basePath);
-      window.FaceAPI.faceDetectionReady = true;
-      progressCallback(50);
-      
-      // Load other required models
-      await Promise.all([
-        faceapi.nets.faceLandmark68TinyNet.load(basePath),
-        faceapi.nets.faceRecognitionNet.load(basePath)
-      ]);
-      
-      progressCallback(80);
-      
-      // Verify the models are working
-      const modelsVerified = await verifyModelsLoaded();
-      
-      if (!modelsVerified) {
-        throw new Error('Models loaded but verification failed');
-      }
-      
-      window.FaceAPI.faceRecognitionReady = true;
-      window.FaceAPI.modelsLoaded = true;
-      window.FaceAPI.lastModelLoadTime = Date.now();
-      progressCallback(100);
-      
-      // Dispatch event for UI to update
-      window.dispatchEvent(new CustomEvent('faceApiModelsLoaded'));
-      
-      console.log('✅ Models loaded successfully');
-      window.FaceAPI.modelLoadingPromise = null;
-      return true;
-    } catch (error) {
-      console.error('❌ Error loading models:', error.message);
-      window.FaceAPI.modelLoadingPromise = null;
-      
-      // Retry loading if under max retries
-      if (window.FaceAPI.loadRetries < window.FaceAPI.maxRetries) {
-        window.FaceAPI.loadRetries++;
-        console.log(`🔁 Retrying model load (${window.FaceAPI.loadRetries}/${window.FaceAPI.maxRetries})`);
-        
-        // Reset state
-        window.FaceAPI.faceDetectionReady = false;
-        window.FaceAPI.faceRecognitionReady = false;
-        
-        // Small delay before retry
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return loadFaceApiModels(progressCallback);
-      }
-      
-      throw error;
+      await faceapi.detectSingleFace(
+        canvas,
+        window.FaceAPI.tinyFaceDetectorOptions
+      );
+      console.log('Face detector warmed up');
+    } catch(e) {
+      console.warn('Warmup error:', e);
     }
-  })();
+  },
   
-  return window.FaceAPI.modelLoadingPromise;
-}
-
-// Force reload models when needed
-function forceReloadModels(progressCallback = () => {}) {
-  // Reset all model state
-  window.FaceAPI.modelsLoaded = false;
-  window.FaceAPI.faceDetectionReady = false;
-  window.FaceAPI.faceRecognitionReady = false;
-  window.FaceAPI.modelLoadingPromise = null;
-  window.FaceAPI.loadRetries = 0;
-  
-  // Force unload models if possible
-  try {
-    faceapi.nets.tinyFaceDetector.isLoaded = false;
-    faceapi.nets.faceLandmark68TinyNet.isLoaded = false;
-    faceapi.nets.faceRecognitionNet.isLoaded = false;
-  } catch (e) {
-    console.error('Error resetting models:', e);
-  }
-  
-  // Reload
-  return loadFaceApiModels(progressCallback);
-}
-
-// Simplified face detection with error handling
-async function detectFaces(videoElement) {
-  if (!window.FaceAPI.faceDetectionReady) {
-    console.warn('Face detection not ready, loading models...');
-    try {
-      await loadFaceApiModels();
-    } catch (e) {
-      console.error('Failed to load models for detection:', e.message);
-      return [];
-    }
-  }
-  
-  try {
-    return await faceapi.detectAllFaces(
-      videoElement,
-      getFaceDetectionOptions()
-    );
-  } catch (error) {
-    console.error('Face detection error:', error.message);
-    
-    // If detection fails but models should be loaded, something is wrong
-    if (window.FaceAPI.faceDetectionReady) {
-      window.FaceAPI.faceDetectionReady = false; // Reset state
-      try {
-        await forceReloadModels(); // Try to recover
-      } catch (e) {
-        console.error('Failed to reload models after error');
+  /**
+   * Get debug information about model loading status
+   */
+  debugModelStatus: function() {
+    return {
+      modelsLoaded: window.FaceAPI.modelsLoaded,
+      faceDetectionReady: window.FaceAPI.faceDetectionReady,
+      isLoading: !!window.FaceAPI.modelLoadingPromise,
+      modelStates: {
+        tinyFaceDetector: window.FaceAPI.models.tinyFaceDetector,
+        faceLandmark68Tiny: window.FaceAPI.models.faceLandmark68Tiny,
+        faceRecognition: window.FaceAPI.models.faceRecognition
+      },
+      performance: {
+        modelLoadTime: window.FaceAPI.metrics.modelLoadTime,
+        averageDetectionTime: window.FaceAPI.metrics.averageDetectionTime.toFixed(2) + 'ms',
+        lastDetection: window.FaceAPI.lastDetectionTime ? 
+          new Date(window.FaceAPI.lastDetectionTime).toLocaleTimeString() : 'never'
       }
-    }
-    return [];
+    };
   }
-}
-
-// Full face detection with descriptor for authentication
-async function detectFaceWithDescriptor(imageElement) {
-  if (!window.FaceAPI.modelsLoaded) {
-    await loadFaceApiModels();
-  }
-  
-  try {
-    return await faceapi.detectSingleFace(
-      imageElement,
-      getFaceDetectionOptions()
-    )
-    .withFaceLandmarks(true)
-    .withFaceDescriptor();
-  } catch (error) {
-    console.error('Face descriptor extraction error:', error.message);
-    return null;
-  }
-}
-
-// Preload models when document is ready
-document.addEventListener('DOMContentLoaded', () => {
-  // Small delay to allow page to render first
-  setTimeout(() => {
-    loadFaceApiModels(percent => {
-      console.log(`Model loading progress: ${percent}%`);
-    }).catch(err => {
-      console.error('Failed to preload models:', err.message);
-    });
-  }, 100);
-});
-
-// Debug function to help diagnose issues
-function debugModelStatus() {
-  const status = {
-    modelsLoaded: window.FaceAPI.modelsLoaded,
-    faceDetectionReady: window.FaceAPI.faceDetectionReady,
-    faceRecognitionReady: window.FaceAPI.faceRecognitionReady,
-    lastLoadTime: window.FaceAPI.lastModelLoadTime 
-      ? new Date(window.FaceAPI.lastModelLoadTime).toISOString()
-      : 'never',
-    modelVersion: window.FaceAPI.modelVersion,
-    loadRetries: window.FaceAPI.loadRetries,
-    tinyFaceDetectorLoaded: faceapi.nets.tinyFaceDetector.isLoaded,
-    faceLandmark68TinyNetLoaded: faceapi.nets.faceLandmark68TinyNet.isLoaded,
-    faceRecognitionNetLoaded: faceapi.nets.faceRecognitionNet.isLoaded
-  };
-  
-  console.table(status);
-  return status;
-}
-
-// Export functions for global access
-window.FaceAPILoader = {
-  loadFaceApiModels,
-  forceReloadModels,
-  detectFaces,
-  detectFaceWithDescriptor,
-  getFaceDetectionOptions,
-  debugModelStatus
 };
