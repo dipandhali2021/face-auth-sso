@@ -22,7 +22,7 @@ dotenv.config();
 // OAuth clients configuration
 const clients = {
   'face-auth-client': {
-    clientId: 'eff8b0c4d1a2e4b3a9c5d7e8f9a0b1c2',
+    clientId: 'face-auth-client',
     clientSecret:
       'd8aa5334cf7f03526f438db137b82809f3bd0847961e833e6d05c04f6def49f5',
     redirectUris: [
