@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Face Authentication</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body { 
+        font-family: Arial, sans-serif; 
+        margin: 0; 
+        padding: 20px;
+        background-color: #fffbf0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+      }
+      .container { 
+        width: 100%;
+        max-width: 450px; 
+        margin: 0 auto; 
+        background-color: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        text-align: center;
+        position: relative;
+      }
+      .icon-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 20px;
+      }
+      .dollar-icon {
+        background-color: #ffd54f;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        color: #333;
+      }
+      h1 { 
+        color: #333; 
+        text-align: center;
+        margin-bottom: 5px;
+        font-size: 22px;
+        font-weight: 600;
+      }
+      .subtitle {
+        text-align: center;
+        color: #666;
+        margin-bottom: 25px;
+        font-size: 14px;
+      }
+      #video-container { 
+        margin: 20px 0; 
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      #video { 
+        width: 100%;
+        max-width: 400px;
+        border-radius: 8px;
+        display: block;
+        margin: 0 auto;
+      }
+      .btn { 
+        background: #666; 
+        color: white; 
+        padding: 12px 24px; 
+        text-decoration: none; 
+        border-radius: 4px; 
+        margin-top: 20px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .btn:hover {
+        background: #555;
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .btn-register { 
+        background: #34a853; 
+        margin-left: 10px;
+      }
+      .btn-register:hover {
+        background: #2d9348;
+      }
+      @media (max-width: 480px) {
+        .container {
+          padding: 20px;
+        }
+        .btn {
+          display: block;
+          width: 100%;
+          margin: 10px auto;
+        }
+        .btn-register {
+          margin-left: 0;
+        }
+      }
+      /* Loading spinner styles */
+      .loading-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: rgba(255, 255, 255, 0.9);
+        z-index: 10;
+        border-radius: 12px;
+      }
+      
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #ffd54f;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 15px;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        font-size: 16px;
+        color: #333;
+        text-align: center;
+        margin-top: 10px;
+      }
+      
+      .loading-progress {
+        font-size: 14px;
+        color: #666;
+        margin-top: 5px;
+      }
+      
+      /* Progress bar */
+      .progress-container {
+        width: 80%;
+        height: 8px;
+        background-color: #f3f3f3;
+        border-radius: 4px;
+        margin-top: 15px;
+        overflow: hidden;
+      }
+      
+      .progress-bar {
+        height: 100%;
+        background-color: #ffd54f;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+      }
+      
+      /* Face detection overlay */
+      .face-box {
+        position: absolute;
+        border: 2px solid #34a853;
+        border-radius: 4px;
+        box-sizing: border-box;
+        pointer-events: none;
+        opacity: 0.8;
+      }
+
+      /* Counter animation */
+      .counter {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 120px;
+        font-weight: bold;
+        color: white;
+        background: rgba(255, 215, 78, 0.7);
+        border-radius: 50%;
+        width: 150px;
+        height: 150px;
+        line-height: 150px;
+        text-align: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+      }
+
+      .counter.show {
+        opacity: 1;
+        animation: count-down 3s forwards;
+      }
+
+      @keyframes count-down {
+        0% { content: "3"; }
+        33% { content: "2"; }
+        66% { content: "1"; }
+        100% { content: ""; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      
+      <h1>Face Authentication</h1>
+      <p class="subtitle">Please look at the camera to authenticate</p>
+      
+      <div id="video-container">
+        <video id="video" width="400" height="300" autoplay></video>
+        <canvas id="canvas" width="400" height="300" style="display:none;"></canvas>
+      </div>
+      
+      <div>
+        <button id="authenticate-btn" class="btn" disabled>Authenticate</button>
+        <button id="register-btn" class="btn btn-register" disabled>Register New Face</button>
+      </div>
+      
+      <form id="auth-form" method="post" action="/face-auth/verify" style="display:none;">
+        <input type="hidden" name="request" id="request-data">
+        <input type="hidden" name="faceImage" id="face-image">
+        <input type="hidden" name="action" id="action-type">
+      </form>
+    </div>
+    
+    <!-- Load face-api.js first -->
+    <script src="/js/face-api.min.js"></script>
+    
+    <!-- Then load the shared model loader -->
+    <script src="/js/shared-model-loader.js"></script>
+    
+    <script>
+      // Get request data from URL parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      const requestData = urlParams.get('request');
+      document.getElementById('request-data').value = requestData;
+      
+      // DOM elements
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const videoContainer = document.getElementById('video-container');
+      const authForm = document.getElementById('auth-form');
+      const faceImageInput = document.getElementById('face-image');
+      const actionTypeInput = document.getElementById('action-type');
+      const authenticateBtn = document.getElementById('authenticate-btn');
+      const registerBtn = document.getElementById('register-btn');
+      
+      // Create loading overlay
+      const loadingContainer = document.createElement('div');
+      loadingContainer.className = 'loading-container';
+      
+      const spinner = document.createElement('div');
+      spinner.className = 'spinner';
+      
+      const loadingText = document.createElement('div');
+      loadingText.className = 'loading-text';
+      loadingText.textContent = 'Initializing Face Detection...';
+      
+      const loadingProgress = document.createElement('div');
+      loadingProgress.className = 'loading-progress';
+      loadingProgress.textContent = 'Starting camera...';
+      
+      const progressContainer = document.createElement('div');
+      progressContainer.className = 'progress-container';
+      
+      const progressBar = document.createElement('div');
+      progressBar.className = 'progress-bar';
+      progressBar.style.width = '0%';
+      
+      progressContainer.appendChild(progressBar);
+      
+      loadingContainer.appendChild(spinner);
+      loadingContainer.appendChild(loadingText);
+      loadingContainer.appendChild(loadingProgress);
+      loadingContainer.appendChild(progressContainer);
+      
+      // Add loading overlay to container
+      document.querySelector('.container').appendChild(loadingContainer);
+      
+      // Face detection variables
+      let faceDetectionInterval;
+      let currentFaceDetected = false;
+      
+      // Update progress bar
+      function updateProgress(percent) {
+        progressBar.style.width = `${percent}%`;
+      }
+      
+      // Start video stream
+      async function startVideo() {
+        try {
+          const constraints = {
+            video: {
+              facingMode: 'user',
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            }
+          };
+          
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = stream;
+          
+          return new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+              video.play();
+              loadingProgress.textContent = 'Camera ready';
+              updateProgress(40);
+              resolve();
+            };
+          });
+        } catch (err) {
+          console.error('Error accessing camera:', err);
+          loadingText.textContent = 'Camera Access Error';
+          loadingProgress.textContent = 'Please ensure camera access is allowed and refresh the page';
+          return Promise.reject(err);
+        }
+      }
+      
+      // Face detection function using the shared loader
+      function startFaceDetection() {
+        if (faceDetectionInterval) clearInterval(faceDetectionInterval);
+        
+        faceDetectionInterval = setInterval(async () => {
+          if (video.paused || video.ended) return;
+          
+          try {
+            // Always attempt detection regardless of faceDetectionReady flag
+            // The detectFaces function will handle initialization if needed
+            const detections = await window.FaceAPILoader.detectFaces(video);
+            
+            // Update UI based on face detection
+            const hasFace = detections.length > 0;
+            
+            if (hasFace !== currentFaceDetected) {
+              currentFaceDetected = hasFace;
+              
+              if (hasFace) {
+                // Visual indicator that face is detected
+                video.style.border = '3px solid #34a853';
+                
+                // Enable buttons
+                authenticateBtn.disabled = false;
+                registerBtn.disabled = false;
+                
+                // Don't show face boxes in authentication screen
+                // Keep face detection active but don't display the boxes
+              } else {
+                // Remove face indicator
+                video.style.border = '';
+                authenticateBtn.disabled = true;
+                registerBtn.disabled = true;
+              }
+            }
+          } catch (error) {
+            console.error('Face detection error:', error);
+            // If we get an error, try to force reload models
+            if (!window.FaceAPI.modelLoadingPromise) {
+              console.log('Detection failed, attempting to reload models');
+              window.FaceAPILoader.forceReloadModels(updateProgress)
+                .then(() => {
+                  console.log('Models reloaded after detection failure');
+                })
+                .catch(err => console.error('Model reload failed:', err));
+            }
+          }
+        }, 200);
+      }
+      
+      // Add visual face boxes - not used in authentication screen
+      function updateFaceBoxes(detections) {
+        // Function kept for compatibility but not used in authentication screen
+        // This ensures we can still use it in other pages if needed
+        console.log("Face detected but boxes not shown in authentication");
+      }
+      
+      // Create countdown element
+      const countdownElement = document.createElement('div');
+      countdownElement.className = 'counter';
+      videoContainer.appendChild(countdownElement);
+      
+      // Capture face image with improved quality and countdown
+      function captureFace(action) {
+        if (!currentFaceDetected) {
+          loadingText.textContent = 'No Face Detected';
+          loadingProgress.textContent = 'Please position your face in front of the camera';
+          loadingContainer.style.display = 'flex';
+          setTimeout(() => loadingContainer.style.display = 'none', 1500);
+          return;
+        }
+        
+        // Disable buttons during processing
+        authenticateBtn.disabled = true;
+        registerBtn.disabled = true;
+        
+        if (action === 'authenticate') {
+          // Use countdown only for authentication
+          // Start countdown animation
+          let count = 3;
+          countdownElement.textContent = count;
+          countdownElement.style.opacity = '1';
+          
+          const countdownInterval = setInterval(() => {
+            count--;
+            if (count > 0) {
+              countdownElement.textContent = count;
+            } else {
+              clearInterval(countdownInterval);
+              countdownElement.style.opacity = '0';
+              
+              // Show processing indicator
+              loadingText.textContent = 'Processing Your Face...';
+              loadingProgress.textContent = 'Please wait';
+              loadingContainer.style.display = 'flex';
+              
+              // Capture at high quality
+              const context = canvas.getContext('2d');
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              
+              // Get image data with better quality
+              const imageData = canvas.toDataURL('image/jpeg', 0.9);
+              faceImageInput.value = imageData.split(',')[1];
+              actionTypeInput.value = action;
+              
+              // For authentication
+              updateProgress(90);
+              loadingProgress.textContent = 'Authenticating...';
+              setTimeout(() => authForm.submit(), 300);
+            }
+          }, 1000);
+        } else if (action === 'register') {
+          // For registration - redirect directly to register page without countdown
+          // Redirect immediately to registration page with request data
+          window.location.href = '/register?request=' + encodeURIComponent(requestData);
+        }
+      }
+      
+      // Initialize face authentication
+      async function initFaceAuth() {
+        try {
+          // Start video first for better user experience
+          await startVideo();
+          
+          // Check if models are already loaded from cache
+          if (window.FaceAPI.faceDetectionReady) {
+            console.log('Using cached face detection models');
+            loadingText.textContent = 'Initializing...';
+            loadingProgress.textContent = 'Using cached models';
+            updateProgress(70);
+            
+            // Start face detection immediately
+            startFaceDetection();
+            
+            // Fade out loading overlay gradually
+            setTimeout(() => {
+              loadingContainer.style.opacity = '0';
+              loadingContainer.style.transition = 'opacity 0.5s ease';
+              setTimeout(() => loadingContainer.style.display = 'none', 500);
+            }, 1000);
+          } else {
+            // Load models with progress updates
+            window.FaceAPILoader.loadFaceApiModels(updateProgress)
+              .then(() => {
+                loadingText.textContent = 'Face Detection Ready';
+                loadingProgress.textContent = 'You can now authenticate';
+                
+                // Start face detection after models are loaded
+                startFaceDetection();
+                
+                // Fade out loading overlay
+                setTimeout(() => {
+                  loadingContainer.style.opacity = '0';
+                  loadingContainer.style.transition = 'opacity 0.5s ease';
+                  setTimeout(() => loadingContainer.style.display = 'none', 500);
+                }, 500);
+              })
+              .catch(error => {
+                console.error('Error loading models:', error);
+                loadingText.textContent = 'Error Loading Face Detection';
+                loadingProgress.textContent = 'Please refresh the page and try again';
+                
+                // Add a reset button
+                const resetBtn = document.createElement('button');
+                resetBtn.innerText = 'Reset and try again';
+                resetBtn.className = 'btn';
+                resetBtn.style.marginTop = '15px';
+                resetBtn.onclick = () => {
+                  window.FaceAPILoader.forceReloadModels(updateProgress);
+                  loadingText.textContent = 'Reloading models...';
+                  loadingContainer.removeChild(resetBtn);
+                };
+                loadingContainer.appendChild(resetBtn);
+              });
+          }
+          
+        } catch (error) {
+          console.error('Initialization error:', error);
+          loadingText.textContent = 'Initialization Error';
+          loadingProgress.textContent = error.message || 'Please refresh and try again';
+        }
+      }
+      
+      // Listen for model load events
+      window.addEventListener('faceApiModelsLoaded', function() {
+        console.log('Models loaded event received');
+        // Enable buttons if face is detected
+        if (currentFaceDetected) {
+          authenticateBtn.disabled = false;
+          registerBtn.disabled = false;
+        }
+      });
+      
+      // Clean up resources when leaving
+      window.addEventListener('beforeunload', () => {
+        if (faceDetectionInterval) {
+          clearInterval(faceDetectionInterval);
+        }
+        
+        // Stop video tracks
+        if (video.srcObject) {
+          const tracks = video.srcObject.getTracks();
+          tracks.forEach(track => track.stop());
+        }
+      });
+      
+      // Add debug button (hidden in production)
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        const debugBtn = document.createElement('button');
+        debugBtn.innerText = 'Debug Models';
+        debugBtn.style.position = 'fixed';
+        debugBtn.style.bottom = '10px';
+        debugBtn.style.right = '10px';
+        debugBtn.style.fontSize = '12px';
+        debugBtn.style.padding = '5px';
+        debugBtn.style.opacity = '0.7';
+        debugBtn.onclick = () => {
+          const status = window.FaceAPILoader.debugModelStatus();
+          alert(JSON.stringify(status, null, 2));
+        };
+        document.body.appendChild(debugBtn);
+      }
+      
+      // Event listeners
+      authenticateBtn.addEventListener('click', () => captureFace('authenticate'));
+      registerBtn.addEventListener('click', () => captureFace('register'));
+      
+      // Start the application
+      initFaceAuth();
+    </script>
+  </body>
+</html>
