@@ -1,0 +1,46 @@
+.vercel
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+yarn.lock
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Testing
+/coverage
+
+# Production build
+/build
+/dist
+/.next
+/out
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE and editors
+/.idea
+/.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Media files that might be used for testing
+*.jpg
+*.jpeg
+*.png
+*.gif
+/uploads
+
+# Temporary files
+*.tmp
+.cache
