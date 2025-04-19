@@ -1037,6 +1037,65 @@ faceRecognition.loadModels().catch((err) => {
   console.error('Failed to load face-api.js models:', err);
 });
 
+// Connection status endpoint to check MongoDB and Cloudinary
+app.get('/api/connection-status', async (req, res) => {
+  try {
+    // Check MongoDB connection
+    const mongoStatus = {
+      connected: mongoose.connection.readyState === 1,
+      state: getMongoConnectionState(mongoose.connection.readyState),
+      lastChecked: new Date().toISOString()
+    };
+
+    // Check Cloudinary connection by making a small test API call
+    let cloudinaryStatus = {
+      connected: false,
+      error: null,
+      lastChecked: new Date().toISOString()
+    };
+
+    try {
+      // Try to access Cloudinary API with a simple ping request
+      const cloudinaryResult = await cloudinary.testConnection();
+      cloudinaryStatus.connected = true;
+      cloudinaryStatus.details = cloudinaryResult;
+    } catch (cloudinaryError) {
+      cloudinaryStatus.connected = false;
+      cloudinaryStatus.error = cloudinaryError.message;
+    }
+
+    // Return combined status
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      services: {
+        mongodb: mongoStatus,
+        cloudinary: cloudinaryStatus
+      },
+      environment: process.env.NODE_ENV || 'development'
+    });
+  } catch (error) {
+    console.error('Connection status check failed:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to check connection status',
+      error: error.message
+    });
+  }
+});
+
+// Helper function to translate MongoDB connection state codes to readable strings
+function getMongoConnectionState(state) {
+  const states = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+    99: 'uninitialized'
+  };
+  return states[state] || 'unknown';
+}
+
 // Connect to MongoDB and start the server
 connectDB()
   .then(() => {
